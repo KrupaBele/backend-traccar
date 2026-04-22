@@ -10,6 +10,20 @@ const getSnapshotTime = (device) => {
   const raw = device.lastUpdate || device.deviceTime || device.serverTime;
   return raw ? new Date(raw) : new Date();
 };
+const formatUtc = (date) => date.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+const formatIst = (date) =>
+  new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
+    .format(date)
+    .replace(',', '') + ' IST';
 
 export const evaluateAndDispatchEvents = async (devices = []) => {
   const rules = await RuleModel.find({ enabled: true }).lean();
@@ -107,13 +121,17 @@ export const evaluateAndDispatchEvents = async (devices = []) => {
       continue;
     }
 
+    const eventTime = event.eventTime || new Date();
+    const sentTime = new Date();
     const body = [
       `Vehicle Alert (${event.source})`,
       `Device: ${event.deviceName}`,
       `Metric: ${event.metric}`,
       event.value != null ? `Value: ${event.value}` : null,
       `Message: ${event.message}`,
-      `Time: ${new Date().toLocaleString()}`,
+      `Event Time (IST): ${formatIst(eventTime)}`,
+      `Event Time (UTC): ${formatUtc(eventTime)}`,
+      `Sent Time (IST): ${formatIst(sentTime)}`,
     ]
       .filter(Boolean)
       .join('\n');

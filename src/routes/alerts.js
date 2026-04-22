@@ -4,6 +4,20 @@ import { sendWhatsappMessage } from '../services/twilioService.js';
 import { config } from '../config.js';
 
 const router = express.Router();
+const formatUtc = (date) => date.toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+const formatIst = (date) =>
+  new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  })
+    .format(date)
+    .replace(',', '') + ' IST';
 
 const validatePayload = (payload) => {
   if (!payload || typeof payload !== 'object') return 'Body is required';
@@ -38,13 +52,15 @@ router.post('/send', async (req, res) => {
     });
   }
 
+  const sentTime = new Date();
   const body = [
     `Vehicle Alert (${source})`,
     `Device: ${deviceName}`,
     `Metric: ${metric}`,
     value != null ? `Value: ${value}` : null,
     `Message: ${message}`,
-    `Time: ${new Date().toLocaleString()}`,
+    `Sent Time (IST): ${formatIst(sentTime)}`,
+    `Sent Time (UTC): ${formatUtc(sentTime)}`,
   ]
     .filter(Boolean)
     .join('\n');
