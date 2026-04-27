@@ -24,6 +24,11 @@ export const config = {
     whatsappFrom: process.env.TWILIO_WHATSAPP_FROM || '',
     defaultTo: process.env.ALERT_WHATSAPP_TO || '',
   },
+  auth: {
+    jwtSecret:
+      process.env.AUTH_JWT_SECRET || process.env.JWT_SECRET || 'change-me-in-production',
+    jwtExpiresIn: process.env.AUTH_JWT_EXPIRES_IN || process.env.JWT_EXPIRES_IN || '7d',
+  },
   alerts: {
     cooldownSeconds: parseNumber(process.env.ALERT_COOLDOWN_SECONDS, 300),
   },
@@ -41,6 +46,8 @@ export const hasTwilioConfig = Boolean(
     config.twilio.whatsappFrom &&
     config.twilio.defaultTo
 );
+
+export const hasAuthConfig = Boolean(config.auth.jwtSecret);
 
 export const hasMongoConfig = Boolean(config.mongodbUri);
 export const hasTraccarConfig = Boolean(
