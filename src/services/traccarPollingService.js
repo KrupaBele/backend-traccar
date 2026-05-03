@@ -1,8 +1,12 @@
 import { config, hasTraccarConfig } from '../config.js';
 import { evaluateAndDispatchEvents } from './ruleEngineEvaluator.js';
+import { getFuelStatesByDeviceIds, upsertFuelEntries, upsertFuelFromPositions } from './deviceFuelStore.js';
 
 let pollingTimer = null;
 let isRunning = false;
+const REPORT_LOOKBACK_HOURS = 24;
+const REPORT_FALLBACK_COOLDOWN_MS = 30 * 60 * 1000;
+const lastReportFetchByDeviceId = new Map();
 
 const authHeader = () => {
   const encoded = Buffer.from(
@@ -22,6 +26,98 @@ const normalizeTraccarDevice = (device, speedByDeviceId) => ({
   deviceTime: device?.lastUpdate ?? null,
   serverTime: device?.lastUpdate ?? null,
 });
+
+const asNumber = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const fetchLatestFuelFromReport = async (deviceId) => {
+  const to = new Date();
+  const from = new Date(to.getTime() - REPORT_LOOKBACK_HOURS * 60 * 60 * 1000);
+  const params = new URLSearchParams({
+    deviceId: String(deviceId),
+    from: from.toISOString(),
+    to: to.toISOString(),
+  });
+
+  const response = await fetch(`${config.traccar.baseUrl}/reports/route?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      Authorization: authHeader(),
+      Accept: 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const rows = await response.json().catch(() => []);
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
+
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    const attrs = row?.attributes || {};
+    const fuel = asNumber(attrs.fuel);
+    const fuelLevel = asNumber(attrs.fuelLevel);
+    if (fuel > 0 || fuelLevel > 0) {
+      return {
+        deviceId,
+        fuel: fuel > 0 ? fuel : fuelLevel,
+        fuelLevel: fuelLevel > 0 ? fuelLevel : fuel,
+        fixTime: row?.fixTime || null,
+      };
+    }
+  }
+
+  return null;
+};
+
+const backfillFuelFromReportIfMissing = async (positions = []) => {
+  const nowMs = Date.now();
+  const deviceIds = Array.from(
+    new Set(
+      positions
+        .map((position) => Number(position?.deviceId))
+        .filter((deviceId) => Number.isFinite(deviceId) && deviceId > 0)
+    )
+  );
+
+  if (deviceIds.length === 0) {
+    return;
+  }
+
+  const knownStates = await getFuelStatesByDeviceIds(deviceIds);
+  const knownByDeviceId = new Map(knownStates.map((item) => [item.deviceId, item]));
+  const candidates = deviceIds.filter((deviceId) => {
+    const known = knownByDeviceId.get(deviceId);
+    if (known && (known.fuel > 0 || known.fuelLevel > 0)) {
+      return false;
+    }
+    const lastAttempt = Number(lastReportFetchByDeviceId.get(deviceId) || 0);
+    return nowMs - lastAttempt >= REPORT_FALLBACK_COOLDOWN_MS;
+  });
+
+  if (candidates.length === 0) {
+    return;
+  }
+
+  const backfilledEntries = [];
+  for (const deviceId of candidates) {
+    lastReportFetchByDeviceId.set(deviceId, nowMs);
+    const entry = await fetchLatestFuelFromReport(deviceId);
+    if (entry) {
+      backfilledEntries.push(entry);
+    }
+  }
+
+  if (backfilledEntries.length > 0) {
+    await upsertFuelEntries(backfilledEntries);
+  }
+};
 
 const pollOnce = async () => {
   if (isRunning) return;
@@ -63,6 +159,8 @@ const pollOnce = async () => {
       positionResp.json(),
     ]);
     const positions = Array.isArray(positionData) ? positionData : [];
+    await upsertFuelFromPositions(positions);
+    await backfillFuelFromReportIfMissing(positions);
     const speedByDeviceId = new Map(
       positions.map((p) => [Number(p?.deviceId ?? -1), Number(p?.speed ?? 0)])
     );

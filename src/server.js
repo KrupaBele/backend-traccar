@@ -4,6 +4,7 @@ import { config } from './config.js';
 import alertsRouter from './routes/alerts.js';
 import rulesRouter from './routes/rules.js';
 import authRouter from './routes/auth.js';
+import fleetRouter from './routes/fleet.js';
 import { connectDatabase } from './db.js';
 import { startTraccarPolling } from './services/traccarPollingService.js';
 
@@ -34,6 +35,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/alerts', alertsRouter);
 app.use('/api/rules', rulesRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/fleet', fleetRouter);
 
 app.use((error, _req, res, _next) => {
   res.status(500).json({
